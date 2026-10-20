@@ -76,6 +76,8 @@ fun LiveChart(
     secondsPerSample: Int,
     modifier: Modifier = Modifier,
     scale: QualityScale? = null,
+    /** Smallest value range shown, so tiny wobbles don't fill the whole graph. */
+    minSpan: Float = 4f,
 ) {
     val shown = series.filter { s -> s.values.any { it != null } }
     // Series with no history still get a legend line, so "5G not connected" is visible.
@@ -172,7 +174,7 @@ fun LiveChart(
             val all = shown.flatMap { it.values.filterNotNull() }
             if (all.isEmpty() || plotW <= 0f) return@Canvas
 
-            val (lo, hi, step) = niceRange(all.min(), all.max())
+            val (lo, hi, step) = niceRange(all.min(), all.max(), minSpan)
             fun y(v: Float) = bottom - (v - lo) / (hi - lo) * (bottom - top)
             fun x(i: Int) = left + plotW * (capacity - count + i) / (capacity - 1).toFloat()
 
@@ -189,7 +191,7 @@ fun LiveChart(
                     val zBottom = y(range.first.coerceAtLeast(lo))
                     if (zBottom > zTop) {
                         drawRect(
-                            q.color.copy(alpha = 0.08f),
+                            q.color.copy(alpha = 0.11f),
                             topLeft = Offset(left, zTop),
                             size = androidx.compose.ui.geometry.Size(plotW, zBottom - zTop),
                         )
@@ -254,10 +256,14 @@ private fun slotAt(x: Float, left: Float, width: Float, capacity: Int): Int {
 }
 
 /** Clean axis bounds: rounds out to a step from 1/2/5/10/20 giving ~3–4 gridlines. */
-private fun niceRange(min: Float, max: Float): Triple<Float, Float, Float> {
+private fun niceRange(min: Float, max: Float, minSpan: Float): Triple<Float, Float, Float> {
     var lo = min
     var hi = max
-    if (hi - lo < 4f) { lo -= 2f; hi += 2f }
+    if (hi - lo < minSpan) {
+        val mid = (hi + lo) / 2f
+        lo = mid - minSpan / 2f
+        hi = mid + minSpan / 2f
+    }
     val step = listOf(1f, 2f, 5f, 10f, 20f, 50f).first { (hi - lo) / it <= 4f }
     lo = floor(lo / step) * step
     hi = ceil(hi / step) * step

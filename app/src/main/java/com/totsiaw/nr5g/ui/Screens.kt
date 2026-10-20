@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -29,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -88,7 +91,10 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
     ) { innerPadding ->
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = innerPadding,
         ) {
             item(key = "hero") { HeroCard(signals, nrChannels, vm.onWifi) }
@@ -328,6 +334,7 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
             capacity = SignalHistory.CAPACITY,
             secondsPerSample = SignalHistory.SECONDS_PER_SAMPLE,
             scale = QualityScale.Power,
+            minSpan = 20f,
         )
         LiveChart(
             title = "Signal quality",
@@ -339,36 +346,51 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
             capacity = SignalHistory.CAPACITY,
             secondsPerSample = SignalHistory.SECONDS_PER_SAMPLE,
             scale = QualityScale.Snr,
+            minSpan = 15f,
         )
 
         val actual = actualNetwork(sim, channel)
+        val nrArfcn = sim.nrArfcn ?: channel?.arfcn
+        val nrBand = sim.nrBand ?: channel?.band
+        val on5g = nrAttached(sim, channel)
+
         kv("Network", actual)
         kv("Status bar shows", sim.displayNetwork.takeIf { it != actual })
         kv("5G", fiveGState(sim, channel))
-        kv("Override", sim.overrideNetwork.takeIf { it != "NONE" })
-        kv("NR state", sim.nrState)
-        kv("EN-DC available", sim.isEnDcAvailable?.let { if (it) "yes" else "no" })
-        kv("NR available", sim.isNrAvailable?.let { if (it) "yes" else "no" })
-        // LTE
         kv("LTE RSRP", sim.lteRsrp?.let { "$it dBm" }, QualityScale.Power.of(sim.lteRsrp))
         kv("LTE RSRQ", sim.lteRsrq?.let { "$it dB" }, QualityScale.Rsrq.of(sim.lteRsrq))
         kv("LTE SNR", sim.lteRssnr?.let { "$it dB" }, QualityScale.Snr.of(sim.lteRssnr))
         kv("LTE band", sim.lteBand)
-        kv("EARFCN", sim.lteEarfcn?.toString())
-        kv("LTE PCI", sim.ltePci?.toString())
-        // NR
         kv("NR SS-RSRP", sim.nrSsRsrp?.let { "$it dBm" }, QualityScale.Power.of(sim.nrSsRsrp))
         kv("NR SS-RSRQ", sim.nrSsRsrq?.let { "$it dB" }, QualityScale.Rsrq.of(sim.nrSsRsrq))
         kv("NR SS-SINR", sim.nrSsSinr?.let { "$it dB" }, QualityScale.Snr.of(sim.nrSsSinr))
-        // Public cell list first, live channel table (Shizuku) as fallback.
-        val nrArfcn = sim.nrArfcn ?: channel?.arfcn
-        val nrBand = sim.nrBand ?: channel?.band
-        val on5g = nrAttached(sim, channel)
         kv("NR band", nrBand ?: if (on5g) "Not reported by phone" else null)
-        kv("NR frequency", nrArfcn?.let { NrBands.describe(it) })
-        kv("NR bandwidth", channel?.bandwidthMhz?.let { "$it MHz" })
-        kv("NR-ARFCN", nrArfcn?.toString())
-        kv("NR PCI", (sim.nrPci ?: channel?.pci)?.toString())
+
+        // Expert rows, folded away so the card stays short.
+        var details by remember(sim.subId) { mutableStateOf(false) }
+        BasicComponent(
+            title = "More details",
+            insideMargin = RowMargin,
+            onClick = { details = !details },
+            endActions = {
+                Text(
+                    text = if (details) "Hide" else "Show",
+                    color = MiuixTheme.colorScheme.primary,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                )
+            },
+        )
+        if (details) {
+            kv("EN-DC available", sim.isEnDcAvailable?.let { if (it) "yes" else "no" })
+            kv("NR available", sim.isNrAvailable?.let { if (it) "yes" else "no" })
+            kv("NR state", sim.nrState)
+            kv("EARFCN", sim.lteEarfcn?.toString())
+            kv("LTE PCI", sim.ltePci?.toString())
+            kv("NR frequency", nrArfcn?.let { NrBands.describe(it) })
+            kv("NR bandwidth", channel?.bandwidthMhz?.let { "$it MHz" })
+            kv("NR-ARFCN", nrArfcn?.toString())
+            kv("NR PCI", (sim.nrPci ?: channel?.pci)?.toString())
+        }
     }
 }
 
@@ -379,6 +401,7 @@ private fun kv(key: String, value: String?, quality: Quality? = null) {
     var open by remember(key) { mutableStateOf(false) }
     BasicComponent(
         modifier = Modifier.animateContentSize(),
+        insideMargin = RowMargin,
         title = key,
         summary = if (open) info else null,
         startAction = if (info != null) ({ InfoIcon() }) else null,
@@ -456,7 +479,13 @@ fun AboutScreen(onBack: () -> Unit) {
             )
         },
     ) { innerPadding ->
-        LazyColumn(contentPadding = innerPadding, modifier = Modifier.fillMaxWidth()) {
+        LazyColumn(
+            contentPadding = innerPadding,
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+        ) {
             item {
                 Card(modifier = cardMod()) {
                     Column(
@@ -512,6 +541,9 @@ private fun AboutText(text: String) {
 }
 
 /* ----------------------------------------------------------------------- */
+
+/** Tighter than the default list row, so signal cards stay short. */
+private val RowMargin = PaddingValues(horizontal = 16.dp, vertical = 11.dp)
 
 private fun cardMod(): Modifier = Modifier
     .fillMaxWidth()

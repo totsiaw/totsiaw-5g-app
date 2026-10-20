@@ -29,8 +29,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val signals = repo.signals
     val shizukuState: StateFlow<ShizukuManager.State> = ShizukuManager.state
 
-    private val _history = MutableStateFlow<Map<Int, SignalHistory>>(emptyMap())
-    val history: StateFlow<Map<Int, SignalHistory>> = _history.asStateFlow()
+    val history: StateFlow<Map<Int, SignalHistory>> = historyStore.asStateFlow()
 
     /** 5G carrier per SIM slot from the live channel table (Shizuku), see [NrModeController.readNrChannels]. */
     private val _nrChannels = MutableStateFlow<Map<Int, NrChannel>>(emptyMap())
@@ -65,17 +64,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // radio reports nothing new.
         viewModelScope.launch {
             while (isActive) {
-                delay(SignalHistory.SECONDS_PER_SAMPLE * 1000L)
                 onWifi = connectivity?.getNetworkCapabilities(connectivity.activeNetwork)
                     ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
                 repo.refreshDataSim()
-                val sims = signals.value
-                if (sims.isNotEmpty()) {
-                    val old = _history.value
-                    _history.value = sims.associate { s ->
-                        s.subId to (old[s.subId] ?: SignalHistory()).append(s)
-                    }
-                }
+                sample()
+                delay(SignalHistory.SECONDS_PER_SAMPLE * 1000L)
             }
         }
         // Shell read, so only while the app is on screen.
@@ -86,6 +79,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 delay(5000)
             }
+        }
+    }
+
+    private fun sample() {
+        val sims = signals.value
+        if (sims.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val step = SignalHistory.SECONDS_PER_SAMPLE * 1000L
+        // Seconds skipped since the last sample (e.g. the app was closed) become blanks.
+        val missed = if (lastSampleAt == 0L) 0 else ((now - lastSampleAt) / step - 1).toInt()
+        lastSampleAt = now
+        val old = historyStore.value
+        historyStore.value = sims.associate { s ->
+            s.subId to (old[s.subId] ?: SignalHistory()).gap(missed).append(s)
         }
     }
 
@@ -137,5 +144,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         repo.stop()
+    }
+
+    private companion object {
+        // Kept for the life of the app process so reopening the screen keeps the graphs.
+        val historyStore = MutableStateFlow<Map<Int, SignalHistory>>(emptyMap())
+        var lastSampleAt = 0L
     }
 }

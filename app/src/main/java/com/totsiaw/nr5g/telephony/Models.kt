@@ -48,6 +48,14 @@ data class SignalHistory(
         nrSinr = nrSinr.push(s.nrSsSinr),
     )
 
+    /** [n] missing seconds (app was closed): blanks keep the time axis honest. */
+    fun gap(n: Int): SignalHistory {
+        if (n <= 0) return this
+        val blanks = List(n.coerceAtMost(CAPACITY)) { null }
+        fun List<Float?>.pad() = (this + blanks).takeLast(CAPACITY)
+        return SignalHistory(lteRsrp.pad(), nrRsrp.pad(), lteSinr.pad(), nrSinr.pad())
+    }
+
     companion object {
         const val CAPACITY = 120          // samples kept
         const val SECONDS_PER_SAMPLE = 1  // → 2 minutes on screen
