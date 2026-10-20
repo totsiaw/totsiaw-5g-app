@@ -9,8 +9,13 @@ import androidx.lifecycle.viewModelScope
 import com.totsiaw.nr5g.nr.NrModeController
 import com.totsiaw.nr5g.nr.VerifyInfo
 import com.totsiaw.nr5g.shizuku.ShizukuManager
+import com.totsiaw.nr5g.telephony.SignalHistory
 import com.totsiaw.nr5g.telephony.SignalRepository
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -20,6 +25,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val signals = repo.signals
     val shizukuState: StateFlow<ShizukuManager.State> = ShizukuManager.state
+
+    private val _history = MutableStateFlow<Map<Int, SignalHistory>>(emptyMap())
+    val history: StateFlow<Map<Int, SignalHistory>> = _history.asStateFlow()
 
     var permissionsGranted by mutableStateOf(false)
         private set
@@ -37,6 +45,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             ShizukuManager.state.collect { state ->
                 if (state == ShizukuManager.State.READY) refreshMode()
+            }
+        }
+        // Sample at a fixed rate so the graphs scroll steadily even when the
+        // radio reports nothing new.
+        viewModelScope.launch {
+            while (isActive) {
+                delay(SignalHistory.SECONDS_PER_SAMPLE * 1000L)
+                val sims = signals.value
+                if (sims.isNotEmpty()) {
+                    val old = _history.value
+                    _history.value = sims.associate { s ->
+                        s.subId to (old[s.subId] ?: SignalHistory()).append(s)
+                    }
+                }
             }
         }
     }
@@ -66,7 +88,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (busy || ShizukuManager.state.value != ShizukuManager.State.READY) return
         viewModelScope.launch {
             busy = true
-            statusLine = "Reading radio state…"
+            statusLine = "Checking…"
             verifyInfo = nr.verify()
             statusLine = null
             busy = false

@@ -22,33 +22,33 @@ class NrModeController {
     suspend fun isNsaEnabled(): Boolean = readUserNrMode() == "3"
 
     suspend fun enableNsa(onStep: (String) -> Unit): Boolean {
-        onStep("Setting NR mode to 3 (NSA)…")
+        onStep("Turning on 5G…")
         val put = ShizukuManager.exec("settings put system user_nr_mode 3")
         if (!put.ok) {
-            onStep("Failed: ${put.err.ifBlank { "could not write user_nr_mode" }}")
+            onStep("Couldn't turn on 5G. Check that Shizuku is running.")
             return false
         }
         toggleAirplane(onStep)
-        onStep("Checking for EN-DC…")
+        onStep("Looking for 5G…")
         val up = pollEnDc()
-        onStep(if (up) "Done — 5G (NSA) is active." else "Applied. 5G will light up when a 5G cell is in range.")
+        onStep(if (up) "5G is on." else "5G is on. It will show up near a 5G tower.")
         return true
     }
 
     suspend fun reset(onStep: (String) -> Unit): Boolean {
-        onStep("Removing NR mode override…")
+        onStep("Restoring default…")
         val del = ShizukuManager.exec("settings delete system user_nr_mode")
         if (!del.ok) {
-            onStep("Failed: ${del.err.ifBlank { "could not delete user_nr_mode" }}")
+            onStep("Couldn't restore default. Check that Shizuku is running.")
             return false
         }
         toggleAirplane(onStep)
-        onStep("Reset to stock (NSA off).")
+        onStep("Back to default.")
         return true
     }
 
     private suspend fun toggleAirplane(onStep: (String) -> Unit) {
-        onStep("Re-applying radio (airplane mode)…")
+        onStep("Restarting mobile network…")
         ShizukuManager.exec("cmd connectivity airplane-mode enable")
         delay(3000)
         ShizukuManager.exec("cmd connectivity airplane-mode disable")

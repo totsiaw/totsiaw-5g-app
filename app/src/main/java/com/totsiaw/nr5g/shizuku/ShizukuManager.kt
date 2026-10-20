@@ -13,7 +13,7 @@ import rikka.shizuku.Shizuku
 
 /**
  * Thin wrapper over the Shizuku client API. Lets the app run shell commands with
- * the shell UID (2000) — enough for `settings put system user_nr_mode 3` and
+ * the shell UID (2000), enough for `settings put system user_nr_mode 3` and
  * `cmd connectivity airplane-mode …` without root.
  */
 object ShizukuManager {

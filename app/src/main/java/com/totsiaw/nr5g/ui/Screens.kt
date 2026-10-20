@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.totsiaw.nr5g.MainViewModel
 import com.totsiaw.nr5g.nr.VerifyInfo
 import com.totsiaw.nr5g.shizuku.ShizukuManager
+import com.totsiaw.nr5g.telephony.SignalHistory
 import com.totsiaw.nr5g.telephony.SimSignal
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -71,6 +73,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
     val scrollBehavior = MiuixScrollBehavior()
     val listState = rememberLazyListState()
     val signals by vm.signals.collectAsState()
+    val history by vm.history.collectAsState()
     val shizuku by vm.shizukuState.collectAsState()
 
     Scaffold(
@@ -86,7 +89,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
             item(key = "hero") { HeroCard(signals) }
 
             item(key = "control") {
-                SmallTitle(text = "5G (NSA)")
+                SmallTitle(text = "Controls")
                 ControlCard(
                     shizuku = shizuku,
                     nsaEnabled = vm.nsaEnabled,
@@ -100,7 +103,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
 
             vm.verifyInfo?.let { info ->
                 item(key = "verify") {
-                    SmallTitle(text = "Verify")
+                    SmallTitle(text = "Status")
                     VerifyCard(info, onClose = vm::clearVerify)
                 }
             }
@@ -110,8 +113,8 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
                     SmallTitle(text = "Permissions")
                     Card(modifier = cardMod()) {
                         SuperArrow(
-                            title = "Grant phone & location access",
-                            summary = "Needed to read signal, band, EARFCN/PCI and NR state",
+                            title = "Allow phone and location access",
+                            summary = "Needed to show your signal",
                             onClick = onRequestPermissions,
                         )
                     }
@@ -124,23 +127,21 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
                     Card(modifier = cardMod()) {
                         BasicComponent(
                             title = "No SIM data yet",
-                            summary = if (vm.permissionsGranted) "Waiting for the radio to report…"
-                            else "Grant permissions above to read signal.",
+                            summary = if (vm.permissionsGranted) "Waiting for the network…"
+                            else "Allow access above to see your signal.",
                         )
                     }
                 }
             } else {
-                items(signals, key = { it.subId }) { sim -> SignalCard(sim) }
+                items(signals, key = { it.subId }) { sim ->
+                    SignalCard(sim, history[sim.subId] ?: SignalHistory())
+                }
             }
 
             item(key = "about") {
                 SmallTitle(text = "App")
                 Card(modifier = cardMod()) {
-                    SuperArrow(
-                        title = "About",
-                        summary = "Credits & how it works",
-                        onClick = onAbout,
-                    )
+                    SuperArrow(title = "About", onClick = onAbout)
                 }
             }
 
@@ -154,12 +155,11 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
 @Composable
 private fun HeroCard(signals: List<SimSignal>) {
     val primary = signals.firstOrNull { it.overrideNetwork.startsWith("NR") }
-        ?: signals.firstOrNull { it.displayNetwork != "—" }
+        ?: signals.firstOrNull { it.displayNetwork != "No service" }
         ?: signals.firstOrNull()
-    val label = primary?.displayNetwork ?: "—"
-    val active = label.startsWith("5G")
+    val label = primary?.displayNetwork ?: "No service"
     val color = when {
-        active -> AppColors.Active
+        label.startsWith("5G") -> AppColors.Active
         label.startsWith("LTE") -> AppColors.Accent
         else -> MiuixTheme.colorScheme.onSurfaceVariantActions
     }
@@ -174,11 +174,7 @@ private fun HeroCard(signals: List<SimSignal>) {
             Text(text = label, color = color, fontSize = 40.sp, fontWeight = FontWeight.Bold)
             primary?.let {
                 Spacer(Modifier.height(2.dp))
-                Text(
-                    text = it.carrier + if (it.nrState != null) "  •  NR: ${it.nrState}" else "",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantActions,
-                    fontSize = 13.sp,
-                )
+                Text(text = it.carrier, color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 13.sp)
             }
         }
     }
@@ -201,21 +197,19 @@ private fun ControlCard(
 
         val ready = shizuku == ShizukuManager.State.READY
         SuperSwitch(
-            title = "Enable 5G (NSA)",
-            summary = "Sets Oplus NR mode to 3 and re-applies the radio. (1 = off, 3 = NSA on.)",
+            title = "5G",
+            summary = "Use 5G when available",
             checked = nsaEnabled,
             enabled = ready && !busy,
             onCheckedChange = { onToggle(it) },
         )
         SuperArrow(
             title = "Reset to default",
-            summary = "Remove the override (back to stock, NSA off)",
             enabled = ready && !busy,
             onClick = { onToggle(false) },
         )
         SuperArrow(
-            title = "Verify radio state",
-            summary = "Read EN-DC / NR state and the modem's NR mode log",
+            title = "Check status",
             enabled = ready && !busy,
             onClick = onVerify,
         )
@@ -233,10 +227,10 @@ private fun ControlCard(
 @Composable
 private fun ShizukuRow(shizuku: ShizukuManager.State, onRequestShizuku: () -> Unit) {
     val (text, color) = when (shizuku) {
-        ShizukuManager.State.READY -> "Shizuku connected" to AppColors.Active
-        ShizukuManager.State.NEED_PERMISSION -> "Tap to grant Shizuku" to AppColors.Warn
-        ShizukuManager.State.NOT_RUNNING -> "Shizuku not running — start it, then reopen" to AppColors.Warn
-        ShizukuManager.State.NOT_INSTALLED -> "Shizuku not installed" to AppColors.Danger
+        ShizukuManager.State.READY -> "Connected" to AppColors.Active
+        ShizukuManager.State.NEED_PERMISSION -> "Tap to allow" to AppColors.Warn
+        ShizukuManager.State.NOT_RUNNING -> "Not running. Start Shizuku, then reopen the app." to AppColors.Warn
+        ShizukuManager.State.NOT_INSTALLED -> "Not installed" to AppColors.Danger
     }
     BasicComponent(
         title = "Shizuku",
@@ -260,9 +254,32 @@ private fun Dot(color: Color) {
 /* ----------------------------------------------------------------------- */
 
 @Composable
-private fun SignalCard(sim: SimSignal) {
-    SmallTitle(text = "${sim.carrier}  (slot ${sim.slotIndex + 1})")
+private fun SignalCard(sim: SimSignal, history: SignalHistory) {
+    SmallTitle(text = "${sim.carrier} (SIM ${sim.slotIndex + 1})")
     Card(modifier = cardMod()) {
+        val lte = SeriesColors.lte()
+        val nr = SeriesColors.nr()
+        LiveChart(
+            title = "Signal strength",
+            unit = "dBm",
+            series = listOf(
+                ChartSeries("LTE", lte, history.lteRsrp),
+                ChartSeries("5G", nr, history.nrRsrp),
+            ),
+            capacity = SignalHistory.CAPACITY,
+            secondsPerSample = SignalHistory.SECONDS_PER_SAMPLE,
+        )
+        LiveChart(
+            title = "Signal quality",
+            unit = "dB",
+            series = listOf(
+                ChartSeries("LTE", lte, history.lteSinr),
+                ChartSeries("5G", nr, history.nrSinr),
+            ),
+            capacity = SignalHistory.CAPACITY,
+            secondsPerSample = SignalHistory.SECONDS_PER_SAMPLE,
+        )
+
         kv("Network", sim.displayNetwork)
         kv("Override", sim.overrideNetwork.takeIf { it != "NONE" })
         kv("NR state", sim.nrState)
@@ -307,16 +324,16 @@ private fun VerifyCard(info: VerifyInfo, onClose: () -> Unit) {
     Card(modifier = cardMod()) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
-                text = "user_nr_mode = ${info.userNrMode ?: "(unset)"}",
+                text = if (info.userNrMode == "3") "5G is switched on" else "Default setting",
                 color = MiuixTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
             )
             Spacer(Modifier.height(8.dp))
-            Text("telephony.registry", color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 12.sp)
+            Text("Network report", color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 12.sp)
             Text(info.registry, color = MiuixTheme.colorScheme.onSurface, fontSize = 11.sp)
             Spacer(Modifier.height(8.dp))
-            Text("modem NR mode log", color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 12.sp)
+            Text("Modem log", color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 12.sp)
             Text(info.logcat, color = MiuixTheme.colorScheme.onSurface, fontSize = 11.sp)
             Spacer(Modifier.height(12.dp))
             TextButton(text = "Close", onClick = onClose, modifier = Modifier.fillMaxWidth())
@@ -330,6 +347,10 @@ private fun VerifyCard(info: VerifyInfo, onClose: () -> Unit) {
 fun AboutScreen(onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val scrollBehavior = MiuixScrollBehavior()
+    val context = LocalContext.current
+    val version = remember {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -348,7 +369,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     ) {
                         Text("5G Switch", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MiuixTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(4.dp))
-                        Text("v1.0.0", fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantActions)
+                        Text("Version $version", fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantActions)
                         Spacer(Modifier.height(16.dp))
                         Text(
                             "Made with ❤️ by totsiaw",
@@ -363,31 +384,19 @@ fun AboutScreen(onBack: () -> Unit) {
                 SmallTitle(text = "How it works")
                 Card(modifier = cardMod()) {
                     AboutText(
-                        "On this phone, Oplus picks the NR mode from a carrier default that disables " +
-                            "5G NSA for Pakistani networks. This app sets Settings.System “user_nr_mode” " +
-                            "to 3 — which overrides that default — then re-applies the radio with an " +
-                            "airplane-mode toggle. Empirically on this device: 1 = no NSA/EN-DC, 3 = NSA works. " +
-                            "“Reset” removes the override and returns to stock."
+                        "Some carriers keep 5G turned off on this phone. 5G Switch turns it on " +
+                            "and restarts the mobile network so the change takes effect. " +
+                            "Reset puts everything back the way it was."
                     )
                 }
             }
             item {
-                SmallTitle(text = "Requirements")
+                SmallTitle(text = "You need")
                 Card(modifier = cardMod()) {
                     AboutText(
-                        "• Shizuku running (grants the shell UID, no root needed)\n" +
-                            "• Phone + location permission to read signal and cell identity\n" +
-                            "• A 5G (NSA) cell in range for 5G to actually attach"
-                    )
-                }
-            }
-            item {
-                SmallTitle(text = "Note")
-                Card(modifier = cardMod()) {
-                    AboutText(
-                        "This only changes a public system setting via Shizuku. It never writes to " +
-                            "system, vendor or boot partitions. Carrier coverage and device capability " +
-                            "still decide whether 5G connects."
+                        "• Shizuku running\n" +
+                            "• Phone and location access\n" +
+                            "• 5G coverage where you are"
                     )
                 }
             }

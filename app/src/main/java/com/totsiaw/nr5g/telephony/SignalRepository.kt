@@ -51,7 +51,7 @@ class SignalRepository(private val context: Context) {
             val subId = sub.subscriptionId
             val tm = baseTm.createForSubscriptionId(subId)
             val name = sub.carrierName?.toString()?.takeIf { it.isNotBlank() } ?: "SIM ${sub.simSlotIndex + 1}"
-            val initial = SimSignal(subId, sub.simSlotIndex, name, "—", "NONE")
+            val initial = SimSignal(subId, sub.simSlotIndex, name, "No service", "NONE")
             val cb = SignalCallback(subId)
             holders[subId] = Holder(tm, cb, initial)
             tm.registerTelephonyCallback(executor, cb)
@@ -174,7 +174,7 @@ class SignalRepository(private val context: Context) {
             TelephonyManager.NETWORK_TYPE_HSPA,
             TelephonyManager.NETWORK_TYPE_HSPAP,
             TelephonyManager.NETWORK_TYPE_HSDPA -> "3G"
-            TelephonyManager.NETWORK_TYPE_UNKNOWN -> "—"
+            TelephonyManager.NETWORK_TYPE_UNKNOWN -> "No service"
             else -> "2G"
         }
     }
