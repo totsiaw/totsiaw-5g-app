@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.totsiaw.nr5g.nr.FiveGToggle
 import com.totsiaw.nr5g.nr.NrModeController
 import com.totsiaw.nr5g.nr.VerifyInfo
 import com.totsiaw.nr5g.shizuku.ShizukuManager
@@ -39,11 +40,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     var permissionsGranted by mutableStateOf(false)
         private set
-    var nsaEnabled by mutableStateOf(false)
-        private set
-    var busy by mutableStateOf(false)
-        private set
-    var statusLine by mutableStateOf<String?>(null)
+    /** The 5G switch lives in the app process, not this screen. */
+    val toggle: StateFlow<FiveGToggle.State> = FiveGToggle.state
+    var verifying by mutableStateOf(false)
         private set
     var verifyInfo by mutableStateOf<VerifyInfo?>(null)
         private set
@@ -55,9 +54,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         ShizukuManager.init(app)
+        FiveGToggle.init(app)
         viewModelScope.launch {
             ShizukuManager.state.collect { state ->
-                if (state == ShizukuManager.State.READY) refreshMode()
+                if (state == ShizukuManager.State.READY) FiveGToggle.onReady()
             }
         }
         // Sample at a fixed rate so the graphs scroll steadily even when the
@@ -101,30 +101,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (granted) repo.start()
     }
 
-    fun refreshMode() {
-        if (ShizukuManager.state.value != ShizukuManager.State.READY) return
-        viewModelScope.launch { nsaEnabled = nr.isNsaEnabled() }
-    }
-
-    fun setNsa(enable: Boolean) {
-        if (busy || ShizukuManager.state.value != ShizukuManager.State.READY) return
-        viewModelScope.launch {
-            busy = true
-            statusLine = null
-            val ok = if (enable) nr.enableNsa { statusLine = it } else nr.reset { statusLine = it }
-            if (ok) nsaEnabled = nr.isNsaEnabled()
-            busy = false
-        }
-    }
+    fun setNsa(enable: Boolean) = FiveGToggle.set(enable)
 
     fun runVerify() {
-        if (busy || ShizukuManager.state.value != ShizukuManager.State.READY) return
+        if (verifying || ShizukuManager.state.value != ShizukuManager.State.READY) return
         viewModelScope.launch {
-            busy = true
-            statusLine = "Checking…"
+            verifying = true
             verifyInfo = nr.verify()
-            statusLine = null
-            busy = false
+            verifying = false
         }
     }
 
@@ -139,7 +123,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun onResume() {
         inForeground = true
         ShizukuManager.refresh()
-        refreshMode()
+        FiveGToggle.refresh()
     }
 
     override fun onCleared() {

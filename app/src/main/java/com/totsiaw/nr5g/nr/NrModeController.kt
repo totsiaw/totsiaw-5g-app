@@ -3,7 +3,9 @@ package com.totsiaw.nr5g.nr
 import com.totsiaw.nr5g.shizuku.ShizukuManager
 import com.totsiaw.nr5g.telephony.NrBands
 import com.totsiaw.nr5g.telephony.NrChannel
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Drives Oplus NR mode selection via Shizuku shell.
@@ -31,9 +33,7 @@ class NrModeController {
             return false
         }
         toggleAirplane(onStep)
-        onStep("Looking for 5G…")
-        val up = pollEnDc()
-        onStep(if (up) "5G is on." else "5G is on. It will show up near a 5G tower.")
+        onStep("5G is on. It connects when a 5G tower is in range.")
         return true
     }
 
@@ -45,28 +45,20 @@ class NrModeController {
             return false
         }
         toggleAirplane(onStep)
-        onStep("Back to default.")
+        onStep("5G is off (default).")
         return true
     }
 
+    /** Airplane mode on/off makes the modem re-read the setting. Always switches back off. */
     private suspend fun toggleAirplane(onStep: (String) -> Unit) {
         onStep("Restarting mobile network…")
-        ShizukuManager.exec("cmd connectivity airplane-mode enable")
-        delay(3000)
-        ShizukuManager.exec("cmd connectivity airplane-mode disable")
-        delay(2500)
-    }
-
-    private suspend fun pollEnDc(timeoutMs: Long = 18000): Boolean {
-        val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < timeoutMs) {
-            val r = ShizukuManager.exec(
-                "dumpsys telephony.registry | grep -E 'overrideNetwork|isEnDcAvailable'"
-            )
-            if (r.out.contains("NR_NSA") || r.out.contains("isEnDcAvailable = true")) return true
-            delay(1500)
+        try {
+            ShizukuManager.exec("cmd connectivity airplane-mode enable")
+            delay(2000)
+        } finally {
+            withContext(NonCancellable) { ShizukuManager.exec("cmd connectivity airplane-mode disable") }
         }
-        return false
+        delay(1000)
     }
 
     suspend fun verify(): VerifyInfo {

@@ -41,28 +41,49 @@ class SignalRepository(private val context: Context) {
     private val holders = ConcurrentHashMap<Int, Holder>()
     private var started = false
 
-    @SuppressLint("MissingPermission")
+    // SIMs can be swapped, added or removed while the app runs; re-sync on every change.
+    private val subsListener = object : SubscriptionManager.OnSubscriptionsChangedListener() {
+        override fun onSubscriptionsChanged() = syncSubscriptions()
+    }
+
     fun start() {
         if (started || !hasPhoneState() || baseTm == null) return
         started = true
-        val subs = subMgr?.activeSubscriptionInfoList ?: emptyList()
-        val executor = ContextCompat.getMainExecutor(context)
-        for (sub in subs) {
-            val subId = sub.subscriptionId
-            val tm = baseTm.createForSubscriptionId(subId)
-            val name = sub.carrierName?.toString()?.takeIf { it.isNotBlank() } ?: "SIM ${sub.simSlotIndex + 1}"
-            val initial = SimSignal(subId, sub.simSlotIndex, name, "No service", "NONE")
-            val cb = SignalCallback(subId)
-            holders[subId] = Holder(tm, cb, initial)
-            tm.registerTelephonyCallback(executor, cb)
-        }
-        publish()
+        subMgr?.addOnSubscriptionsChangedListener(ContextCompat.getMainExecutor(context), subsListener)
+        syncSubscriptions()
     }
 
     fun stop() {
+        subMgr?.removeOnSubscriptionsChangedListener(subsListener)
         holders.values.forEach { runCatching { it.tm.unregisterTelephonyCallback(it.callback) } }
         holders.clear()
         started = false
+    }
+
+    /** Listen to exactly the active SIMs: drop removed ones, add new ones, refresh names/slots. */
+    @SuppressLint("MissingPermission")
+    private fun syncSubscriptions() {
+        if (!started || baseTm == null) return
+        val subs = subMgr?.activeSubscriptionInfoList ?: emptyList()
+        val active = subs.map { it.subscriptionId }.toSet()
+        holders.keys.filter { it !in active }.forEach { gone ->
+            holders.remove(gone)?.let { runCatching { it.tm.unregisterTelephonyCallback(it.callback) } }
+        }
+        val executor = ContextCompat.getMainExecutor(context)
+        for (sub in subs) {
+            val subId = sub.subscriptionId
+            val name = sub.carrierName?.toString()?.takeIf { it.isNotBlank() } ?: "SIM ${sub.simSlotIndex + 1}"
+            val existing = holders[subId]
+            if (existing != null) {
+                existing.data = existing.data.copy(carrier = name, slotIndex = sub.simSlotIndex)
+                continue
+            }
+            val tm = baseTm.createForSubscriptionId(subId)
+            val cb = SignalCallback(subId)
+            holders[subId] = Holder(tm, cb, SimSignal(subId, sub.simSlotIndex, name, "No service", "NONE"))
+            tm.registerTelephonyCallback(executor, cb)
+        }
+        publish()
     }
 
     private fun hasPhoneState() = ContextCompat.checkSelfPermission(

@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.totsiaw.nr5g.MainViewModel
+import com.totsiaw.nr5g.nr.FiveGToggle
 import com.totsiaw.nr5g.nr.VerifyInfo
 import com.totsiaw.nr5g.shizuku.ShizukuManager
 import com.totsiaw.nr5g.telephony.NrBands
@@ -83,6 +84,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
     val history by vm.history.collectAsState()
     val nrChannels by vm.nrChannels.collectAsState()
     val shizuku by vm.shizukuState.collectAsState()
+    val toggle by vm.toggle.collectAsState()
 
     Scaffold(
         topBar = {
@@ -103,9 +105,8 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
                 SmallTitle(text = "Controls")
                 ControlCard(
                     shizuku = shizuku,
-                    nsaEnabled = vm.nsaEnabled,
-                    busy = vm.busy,
-                    statusLine = vm.statusLine,
+                    toggle = toggle,
+                    verifying = vm.verifying,
                     onToggle = vm::setNsa,
                     onRequestShizuku = vm::requestShizuku,
                     onVerify = vm::runVerify,
@@ -245,9 +246,8 @@ private fun fiveGState(sim: SimSignal, ch: NrChannel?): String? = when {
 @Composable
 private fun ControlCard(
     shizuku: ShizukuManager.State,
-    nsaEnabled: Boolean,
-    busy: Boolean,
-    statusLine: String?,
+    toggle: FiveGToggle.State,
+    verifying: Boolean,
     onToggle: (Boolean) -> Unit,
     onRequestShizuku: () -> Unit,
     onVerify: () -> Unit,
@@ -256,23 +256,25 @@ private fun ControlCard(
         ShizukuRow(shizuku, onRequestShizuku)
 
         val ready = shizuku == ShizukuManager.State.READY
+        // Never greyed out while working: the switch shows your latest choice right away.
         SuperSwitch(
             title = "5G",
             summary = "Use 5G when available",
-            checked = nsaEnabled,
-            enabled = ready && !busy,
+            checked = toggle.checked,
+            enabled = ready,
             onCheckedChange = { onToggle(it) },
         )
         SuperArrow(
             title = "Reset to default",
-            enabled = ready && !busy,
+            enabled = ready && toggle.checked,
             onClick = { onToggle(false) },
         )
         SuperArrow(
             title = "Check status",
-            enabled = ready && !busy,
+            enabled = ready && !verifying,
             onClick = onVerify,
         )
+        val statusLine = if (verifying) "Checking…" else toggle.status
         if (statusLine != null) {
             Text(
                 text = statusLine,
