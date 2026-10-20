@@ -475,7 +475,7 @@ fun AboutScreen(onBack: () -> Unit) {
             TopAppBar(
                 title = "About",
                 scrollBehavior = scrollBehavior,
-                navigationIcon = { TextButton(text = "Back", onClick = onBack) },
+                navigationIcon = { BackNavigationIcon(onClick = onBack, modifier = Modifier.padding(start = 16.dp)) },
             )
         },
     ) { innerPadding ->

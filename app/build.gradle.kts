@@ -14,8 +14,8 @@ android {
         applicationId = "com.totsiaw.nr5g"
         minSdk = 31
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.6.0"
+        versionCode = 9
+        versionName = "1.6.1"
         vectorDrawables { useSupportLibrary = true }
     }
 
