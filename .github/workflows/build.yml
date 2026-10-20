@@ -17,7 +17,15 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Decode signing key
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: echo "$SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/nr5g.jks"
+
       - name: Build debug APK
+        env:
+          SIGNING_KEYSTORE: ${{ runner.temp }}/nr5g.jks
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: ./gradlew :app:assembleDebug --stacktrace
 
       - uses: actions/upload-artifact@v4

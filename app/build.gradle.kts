@@ -19,10 +19,26 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // One fixed key (from CI secrets) so every build can update the installed app.
+    // Without it, each CI runner signs with a fresh debug key and updates are rejected.
+    val keystorePath = System.getenv("SIGNING_KEYSTORE")
+    val keystorePass = System.getenv("SIGNING_PASSWORD")
+    val fixedKey = if (keystorePath != null && keystorePass != null) {
+        signingConfigs.create("fixed") {
+            storeFile = file(keystorePath)
+            storePassword = keystorePass
+            keyAlias = "nr5g"
+            keyPassword = keystorePass
+        }
+    } else null
+
     buildTypes {
+        getByName("debug") {
+            if (fixedKey != null) signingConfig = fixedKey
+        }
         getByName("release") {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = fixedKey ?: signingConfigs.getByName("debug")
         }
     }
 
