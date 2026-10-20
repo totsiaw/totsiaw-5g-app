@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import com.totsiaw.nr5g.MainViewModel
 import com.totsiaw.nr5g.nr.VerifyInfo
 import com.totsiaw.nr5g.shizuku.ShizukuManager
+import com.totsiaw.nr5g.telephony.NrBands
+import com.totsiaw.nr5g.telephony.NrChannel
 import com.totsiaw.nr5g.telephony.SignalHistory
 import com.totsiaw.nr5g.telephony.SimSignal
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -74,6 +76,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
     val listState = rememberLazyListState()
     val signals by vm.signals.collectAsState()
     val history by vm.history.collectAsState()
+    val nrChannels by vm.nrChannels.collectAsState()
     val shizuku by vm.shizukuState.collectAsState()
 
     Scaffold(
@@ -134,7 +137,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
                 }
             } else {
                 items(signals, key = { it.subId }) { sim ->
-                    SignalCard(sim, history[sim.subId] ?: SignalHistory())
+                    SignalCard(sim, history[sim.subId] ?: SignalHistory(), nrChannels[sim.slotIndex])
                 }
             }
 
@@ -254,7 +257,7 @@ private fun Dot(color: Color) {
 /* ----------------------------------------------------------------------- */
 
 @Composable
-private fun SignalCard(sim: SimSignal, history: SignalHistory) {
+private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChannel?) {
     SmallTitle(text = "${sim.carrier} (SIM ${sim.slotIndex + 1})")
     Card(modifier = cardMod()) {
         val lte = SeriesColors.lte()
@@ -296,9 +299,15 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory) {
         kv("NR SS-RSRP", sim.nrSsRsrp?.let { "$it dBm" })
         kv("NR SS-RSRQ", sim.nrSsRsrq?.let { "$it dB" })
         kv("NR SS-SINR", sim.nrSsSinr?.let { "$it dB" })
-        kv("NR band", sim.nrBand)
-        kv("NR-ARFCN", sim.nrArfcn?.toString())
-        kv("NR PCI", sim.nrPci?.toString())
+        // Public cell list first, live channel table (Shizuku) as fallback.
+        val nrArfcn = sim.nrArfcn ?: channel?.arfcn
+        val nrBand = sim.nrBand ?: channel?.band
+        val on5g = sim.displayNetwork.startsWith("5G")
+        kv("NR band", nrBand ?: if (on5g) "Not reported by phone" else null)
+        kv("NR frequency", nrArfcn?.let { NrBands.describe(it) })
+        kv("NR bandwidth", channel?.bandwidthMhz?.let { "$it MHz" })
+        kv("NR-ARFCN", nrArfcn?.toString())
+        kv("NR PCI", (sim.nrPci ?: channel?.pci)?.toString())
     }
 }
 

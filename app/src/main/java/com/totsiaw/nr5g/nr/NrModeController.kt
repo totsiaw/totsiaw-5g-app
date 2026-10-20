@@ -1,6 +1,8 @@
 package com.totsiaw.nr5g.nr
 
 import com.totsiaw.nr5g.shizuku.ShizukuManager
+import com.totsiaw.nr5g.telephony.NrBands
+import com.totsiaw.nr5g.telephony.NrChannel
 import kotlinx.coroutines.delay
 
 /**
@@ -96,6 +98,35 @@ class NrModeController {
             }
         }
         return sims
+    }
+
+    /**
+     * The 5G carrier in use per SIM slot, from the phone's live channel table (needs a
+     * privileged permission, hence Shizuku). In NSA the 5G cell is often missing from
+     * the public cell list, but it shows up here while the 5G leg is active.
+     */
+    suspend fun readNrChannels(): Map<Int, NrChannel> {
+        val r = ShizukuManager.exec("dumpsys telephony.registry | grep -E '^ +mPhysicalChannelConfigs='")
+        if (r.out.isBlank()) return emptyMap()
+        val result = mutableMapOf<Int, NrChannel>()
+        r.out.lines().filter { it.isNotBlank() }.forEachIndexed { slot, line ->
+            val nr = Regex("\\{([^{}]*)\\}").findAll(line).map { it.groupValues[1] }.mapNotNull { e ->
+                fun str(k: String) = Regex("$k=(\\w+)").find(e)?.groupValues?.get(1)
+                fun int(k: String) = str(k)?.toIntOrNull()
+                val channel = int("mDownlinkChannelNumber")?.takeIf { it > 0 }
+                // NR-ARFCNs start above 100000; LTE EARFCNs stay well below that.
+                val isNr = str("mNetworkType") == "NR" || (channel != null && channel >= 100000)
+                if (!isNr) return@mapNotNull null
+                NrChannel(
+                    band = int("mBand")?.takeIf { it > 0 }?.let { "n$it" } ?: channel?.let { NrBands.bandFor(it) },
+                    arfcn = channel,
+                    pci = int("mPhysicalCellId")?.takeIf { it in 0..1007 },
+                    bandwidthMhz = int("mCellBandwidthDownlinkKhz")?.takeIf { it > 0 }?.div(1000),
+                )
+            }.firstOrNull()
+            if (nr != null) result[slot] = nr
+        }
+        return result
     }
 
     private fun flag(line: String, name: String): Boolean? =

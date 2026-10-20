@@ -40,6 +40,11 @@ class MainActivity : ComponentActivity() {
         vm.onResume()
     }
 
+    override fun onPause() {
+        vm.onPause()
+        super.onPause()
+    }
+
     private fun ensurePermissions() {
         val needed = listOf(
             Manifest.permission.READ_PHONE_STATE,

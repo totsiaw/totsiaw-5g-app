@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.totsiaw.nr5g.nr.NrModeController
 import com.totsiaw.nr5g.nr.VerifyInfo
 import com.totsiaw.nr5g.shizuku.ShizukuManager
+import com.totsiaw.nr5g.telephony.NrChannel
 import com.totsiaw.nr5g.telephony.SignalHistory
 import com.totsiaw.nr5g.telephony.SignalRepository
 import kotlinx.coroutines.delay
@@ -28,6 +29,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _history = MutableStateFlow<Map<Int, SignalHistory>>(emptyMap())
     val history: StateFlow<Map<Int, SignalHistory>> = _history.asStateFlow()
+
+    /** 5G carrier per SIM slot from the live channel table (Shizuku), see [NrModeController.readNrChannels]. */
+    private val _nrChannels = MutableStateFlow<Map<Int, NrChannel>>(emptyMap())
+    val nrChannels: StateFlow<Map<Int, NrChannel>> = _nrChannels.asStateFlow()
+
+    private var inForeground = false
 
     var permissionsGranted by mutableStateOf(false)
         private set
@@ -59,6 +66,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         s.subId to (old[s.subId] ?: SignalHistory()).append(s)
                     }
                 }
+            }
+        }
+        // Shell read, so only while the app is on screen.
+        viewModelScope.launch {
+            while (isActive) {
+                if (inForeground && ShizukuManager.state.value == ShizukuManager.State.READY) {
+                    _nrChannels.value = nr.readNrChannels()
+                }
+                delay(5000)
             }
         }
     }
@@ -99,7 +115,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun requestShizuku() = ShizukuManager.requestPermission()
 
+    fun onPause() {
+        inForeground = false
+    }
+
     fun onResume() {
+        inForeground = true
         ShizukuManager.refresh()
         refreshMode()
     }

@@ -140,10 +140,12 @@ class SignalRepository(private val context: Context) {
                     )
                 }
                 (nr?.cellIdentity as? CellIdentityNr)?.let { id ->
+                    val arfcn = id.nrarfcn.valid()
                     r = r.copy(
-                        nrArfcn = id.nrarfcn.valid(),
+                        nrArfcn = arfcn,
                         nrPci = id.pci.valid(),
-                        nrBand = id.bands.joinToString("/").takeIf { b -> b.isNotBlank() }?.let { b -> "n$b" },
+                        nrBand = id.bands.joinToString("/").takeIf { b -> b.isNotBlank() }?.let { b -> "n$b" }
+                            ?: arfcn?.let { a -> NrBands.bandFor(a) },
                     )
                 }
                 r
