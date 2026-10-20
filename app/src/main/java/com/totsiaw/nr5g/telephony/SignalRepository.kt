@@ -102,6 +102,7 @@ class SignalRepository(private val context: Context) {
                 it.copy(
                     displayNetwork = label(info.networkType, info.overrideNetworkType),
                     overrideNetwork = overrideName(info.overrideNetworkType),
+                    rat = label(info.networkType, TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE),
                 )
             }
         }
@@ -126,7 +127,10 @@ class SignalRepository(private val context: Context) {
             val nrState = Regex("nrState=(\\w+)").find(text)?.groupValues?.getOrNull(1)
             val endc = Regex("isEnDcAvailable\\s*=\\s*(true|false)").find(text)?.groupValues?.getOrNull(1)?.toBoolean()
             val nrAvail = Regex("isNrAvailable\\s*=\\s*(true|false)").find(text)?.groupValues?.getOrNull(1)?.toBoolean()
-            update(subId) { it.copy(nrState = nrState, isEnDcAvailable = endc, isNrAvailable = nrAvail) }
+            val ca = serviceState.cellBandwidths.size > 1
+            update(subId) {
+                it.copy(nrState = nrState, isEnDcAvailable = endc, isNrAvailable = nrAvail, carrierAggregation = ca)
+            }
         }
 
         @SuppressLint("MissingPermission")

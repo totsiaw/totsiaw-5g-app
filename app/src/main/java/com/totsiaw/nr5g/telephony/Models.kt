@@ -5,8 +5,12 @@ data class SimSignal(
     val subId: Int,
     val slotIndex: Int,
     val carrier: String,
-    val displayNetwork: String,   // user-facing: "5G NSA", "LTE+", "LTE", "No service"
+    val displayNetwork: String,   // what the status bar shows: "5G NSA", "LTE+", "LTE", "No service"
     val overrideNetwork: String,  // raw: NR_NSA / NR_ADVANCED / LTE_CA / NONE
+    // The radio actually in use. The status bar's 5G (NR_NSA) only means the LTE
+    // cell offers 5G; a 5G carrier may not be attached.
+    val rat: String = "No service",          // "LTE" / "5G SA" / "3G" / "2G" / "No service"
+    val carrierAggregation: Boolean = false, // more than one carrier combined (LTE+)
     // LTE
     val lteRsrp: Int? = null,
     val lteRsrq: Int? = null,

@@ -76,7 +76,9 @@ class NrModeController {
         val reg = ShizukuManager.exec(
             "dumpsys telephony.registry | grep -E '^ +(mServiceState|mTelephonyDisplayInfo)='"
         )
-        return VerifyInfo(switchedOn = switchedOn, sims = parseSims(reg.out), error = !reg.ok && reg.out.isBlank())
+        val attached = readNrChannels()
+        val sims = parseSims(reg.out).mapIndexed { slot, s -> s.copy(nrAttached = slot in attached) }
+        return VerifyInfo(switchedOn = switchedOn, sims = sims, error = !reg.ok && reg.out.isBlank())
     }
 
     private fun parseSims(text: String): List<SimStatus> {
@@ -153,16 +155,26 @@ data class SimStatus(
     val towerNearby: Boolean?,   // isNrAvailable: the LTE cell advertises a 5G partner
     val phoneReady: Boolean?,    // isEnDcAvailable: phone can add 5G on this cell
     val carrierBlocks: Boolean?, // isDcNrRestricted
-    val showing: String = "No service",
+    val showing: String = "No service",  // status bar label
+    val nrAttached: Boolean = false,     // a 5G carrier is really in use
 ) {
+    /** What the phone is actually using, not just what the icon says. */
+    val actual: String
+        get() = when {
+            nrAttached -> "5G"
+            showing.startsWith("5G") -> "LTE"
+            else -> showing
+        }
+
     /**
      * One-line answer to "is 5G working on this SIM?". While the 5G switch is off the
      * modem doesn't report nearby 5G at all, so "no tower" is only claimed when it's on.
      */
     fun verdict(switchedOn: Boolean): String = when {
-        showing.startsWith("5G") -> "Connected to 5G"
+        nrAttached -> "Connected to 5G"
         carrierBlocks == true -> "Your plan doesn't allow 5G"
-        phoneReady == true -> "5G ready. It connects when this SIM is using data."
+        showing.startsWith("5G") || phoneReady == true ->
+            "5G available, but the network hasn't added it. It needs a stronger 5G signal."
         !switchedOn -> "5G is off. Turn it on to look for 5G."
         towerNearby == true -> "5G tower nearby. Still connecting, check again in a minute."
         else -> "No 5G tower here"

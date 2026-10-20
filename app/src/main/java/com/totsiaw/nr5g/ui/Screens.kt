@@ -90,7 +90,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
             modifier = Modifier.fillMaxWidth(),
             contentPadding = innerPadding,
         ) {
-            item(key = "hero") { HeroCard(signals, vm.onWifi) }
+            item(key = "hero") { HeroCard(signals, nrChannels, vm.onWifi) }
 
             item(key = "control") {
                 SmallTitle(text = "Controls")
@@ -157,24 +157,30 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
 /* ----------------------------------------------------------------------- */
 
 @Composable
-private fun HeroCard(signals: List<SimSignal>, onWifi: Boolean) {
-    // "Current connection" is the SIM that carries mobile data.
+private fun HeroCard(signals: List<SimSignal>, channels: Map<Int, NrChannel>, onWifi: Boolean) {
+    // "Current connection" is the SIM that carries mobile data, and shows the radio
+    // actually in use (the status bar's 5G icon can mean "5G offered" only).
     val data = signals.firstOrNull { it.isDataSim } ?: signals.firstOrNull()
-    val label = data?.displayNetwork ?: "No service"
+    val label = data?.let { actualNetwork(it, channels[it.slotIndex]) } ?: "No service"
     val color = when {
         label.startsWith("5G") -> AppColors.Active
         label.startsWith("LTE") -> AppColors.Accent
         else -> MiuixTheme.colorScheme.onSurfaceVariantActions
     }
-    val with5g = signals.firstOrNull { it.displayNetwork.startsWith("5G") }
-        ?: signals.firstOrNull { it.isEnDcAvailable == true }
+    val dataState = data?.let { fiveGState(it, channels[it.slotIndex]) }
+    val other5g = signals.firstOrNull {
+        it.subId != data?.subId && fiveGState(it, channels[it.slotIndex]) in listOf(CONNECTED, AVAILABLE)
+    }
     val hint = when {
-        data == null || label.startsWith("5G") -> null
-        with5g == null -> null
-        with5g.subId != data.subId ->
-            "${with5g.carrier} has 5G here. Set mobile data to ${with5g.carrier} to use it."
-        onWifi -> "5G is ready. You're on Wi-Fi, so it stays idle. Turn off Wi-Fi to use it."
-        else -> "5G is ready. It turns on while data is moving."
+        data == null || dataState == CONNECTED -> null
+        dataState == AVAILABLE && onWifi ->
+            "5G is available. You're on Wi-Fi, so mobile data is idle."
+        dataState == AVAILABLE ->
+            "5G is available, but the network hasn't added it yet. It needs a stronger 5G signal, " +
+                "so try near a window or outdoors."
+        other5g != null ->
+            "${other5g.carrier} has 5G here. Set mobile data to ${other5g.carrier} to use it."
+        else -> null
     }
     Card(modifier = cardMod()) {
         Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
@@ -201,10 +207,28 @@ private fun HeroCard(signals: List<SimSignal>, onWifi: Boolean) {
     }
 }
 
+private const val CONNECTED = "Connected"
+private const val AVAILABLE = "Available, using LTE"
+
+/**
+ * A 5G carrier is really in use: SA, a 5G entry in the live channel table, or a
+ * 5G signal reading. NR_NSA in the status bar alone is not enough.
+ */
+private fun nrAttached(sim: SimSignal, ch: NrChannel?): Boolean =
+    sim.rat == "5G SA" || ch != null || sim.nrSsRsrp != null
+
+/** The radio actually in use. */
+private fun actualNetwork(sim: SimSignal, ch: NrChannel?): String = when {
+    sim.rat == "5G SA" -> "5G SA"
+    nrAttached(sim, ch) -> "5G NSA"
+    sim.rat == "LTE" && sim.carrierAggregation -> "LTE+"
+    else -> sim.rat
+}
+
 /** Plain answer to "is 5G in use on this SIM?". */
-private fun fiveGState(sim: SimSignal): String? = when {
-    sim.displayNetwork.startsWith("5G") -> "Connected"
-    sim.isEnDcAvailable == true -> "Available, not in use"
+private fun fiveGState(sim: SimSignal, ch: NrChannel?): String? = when {
+    nrAttached(sim, ch) -> CONNECTED
+    sim.overrideNetwork.startsWith("NR") || sim.isEnDcAvailable == true -> AVAILABLE
     sim.isEnDcAvailable == false -> "Not available"
     else -> null
 }
@@ -288,7 +312,11 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
     Card(modifier = cardMod()) {
         val lte = SeriesColors.lte()
         val nr = SeriesColors.nr()
-        val nrMissing = fiveGState(sim)?.lowercase() ?: "not connected"
+        val nrMissing = when (fiveGState(sim, channel)) {
+            AVAILABLE -> "available, not added yet"
+            "Not available" -> "not available here"
+            else -> "not connected"
+        }
         LiveChart(
             title = "Signal strength",
             unit = "dBm",
@@ -312,8 +340,10 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
             scale = QualityScale.Snr,
         )
 
-        kv("Network", sim.displayNetwork)
-        kv("5G", fiveGState(sim))
+        val actual = actualNetwork(sim, channel)
+        kv("Network", actual)
+        kv("Status bar shows", sim.displayNetwork.takeIf { it != actual })
+        kv("5G", fiveGState(sim, channel))
         kv("Override", sim.overrideNetwork.takeIf { it != "NONE" })
         kv("NR state", sim.nrState)
         kv("EN-DC available", sim.isEnDcAvailable?.let { if (it) "yes" else "no" })
@@ -332,7 +362,7 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
         // Public cell list first, live channel table (Shizuku) as fallback.
         val nrArfcn = sim.nrArfcn ?: channel?.arfcn
         val nrBand = sim.nrBand ?: channel?.band
-        val on5g = sim.displayNetwork.startsWith("5G")
+        val on5g = nrAttached(sim, channel)
         kv("NR band", nrBand ?: if (on5g) "Not reported by phone" else null)
         kv("NR frequency", nrArfcn?.let { NrBands.describe(it) })
         kv("NR bandwidth", channel?.bandwidthMhz?.let { "$it MHz" })
@@ -378,14 +408,14 @@ private fun VerifyCard(info: VerifyInfo, onClose: () -> Unit) {
                     Dot(
                         when {
                             verdict.startsWith("Connected") -> AppColors.Active
-                            verdict.startsWith("5G ready") -> AppColors.Accent
+                            verdict.startsWith("5G available") -> AppColors.Accent
                             else -> MiuixTheme.colorScheme.onSurfaceVariantActions
                         }
                     )
                 },
                 endActions = {
                     Text(
-                        text = sim.showing,
+                        text = sim.actual,
                         color = MiuixTheme.colorScheme.onSurfaceVariantActions,
                         fontSize = MiuixTheme.textStyles.body2.fontSize,
                     )
