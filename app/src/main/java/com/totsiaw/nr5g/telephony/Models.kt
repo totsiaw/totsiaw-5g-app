@@ -25,6 +25,7 @@ data class SimSignal(
     val nrState: String? = null,          // NONE / RESTRICTED / NOT_RESTRICTED / CONNECTED
     val isEnDcAvailable: Boolean? = null,
     val isNrAvailable: Boolean? = null,
+    val isDataSim: Boolean = false,       // this SIM carries mobile data
 ) {
     val hasNrSignal: Boolean get() = nrSsRsrp != null
 }

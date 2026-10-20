@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -89,7 +90,7 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
             modifier = Modifier.fillMaxWidth(),
             contentPadding = innerPadding,
         ) {
-            item(key = "hero") { HeroCard(signals) }
+            item(key = "hero") { HeroCard(signals, vm.onWifi) }
 
             item(key = "control") {
                 SmallTitle(text = "Controls")
@@ -156,15 +157,24 @@ fun HomeScreen(vm: MainViewModel, onRequestPermissions: () -> Unit, onAbout: () 
 /* ----------------------------------------------------------------------- */
 
 @Composable
-private fun HeroCard(signals: List<SimSignal>) {
-    val primary = signals.firstOrNull { it.overrideNetwork.startsWith("NR") }
-        ?: signals.firstOrNull { it.displayNetwork != "No service" }
-        ?: signals.firstOrNull()
-    val label = primary?.displayNetwork ?: "No service"
+private fun HeroCard(signals: List<SimSignal>, onWifi: Boolean) {
+    // "Current connection" is the SIM that carries mobile data.
+    val data = signals.firstOrNull { it.isDataSim } ?: signals.firstOrNull()
+    val label = data?.displayNetwork ?: "No service"
     val color = when {
         label.startsWith("5G") -> AppColors.Active
         label.startsWith("LTE") -> AppColors.Accent
         else -> MiuixTheme.colorScheme.onSurfaceVariantActions
+    }
+    val with5g = signals.firstOrNull { it.displayNetwork.startsWith("5G") }
+        ?: signals.firstOrNull { it.isEnDcAvailable == true }
+    val hint = when {
+        data == null || label.startsWith("5G") -> null
+        with5g == null -> null
+        with5g.subId != data.subId ->
+            "${with5g.carrier} has 5G here. Set mobile data to ${with5g.carrier} to use it."
+        onWifi -> "5G is ready. You're on Wi-Fi, so it stays idle. Turn off Wi-Fi to use it."
+        else -> "5G is ready. It turns on while data is moving."
     }
     Card(modifier = cardMod()) {
         Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
@@ -175,12 +185,28 @@ private fun HeroCard(signals: List<SimSignal>) {
             )
             Spacer(Modifier.height(6.dp))
             Text(text = label, color = color, fontSize = 40.sp, fontWeight = FontWeight.Bold)
-            primary?.let {
+            data?.let {
                 Spacer(Modifier.height(2.dp))
-                Text(text = it.carrier, color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 13.sp)
+                Text(
+                    text = "Mobile data on ${it.carrier}" + if (onWifi) ", Wi-Fi in use" else "",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                    fontSize = 13.sp,
+                )
+            }
+            hint?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(text = it, color = MiuixTheme.colorScheme.onSurface, fontSize = 13.sp)
             }
         }
     }
+}
+
+/** Plain answer to "is 5G in use on this SIM?". */
+private fun fiveGState(sim: SimSignal): String? = when {
+    sim.displayNetwork.startsWith("5G") -> "Connected"
+    sim.isEnDcAvailable == true -> "Available, not in use"
+    sim.isEnDcAvailable == false -> "Not available"
+    else -> null
 }
 
 /* ----------------------------------------------------------------------- */
@@ -262,43 +288,47 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
     Card(modifier = cardMod()) {
         val lte = SeriesColors.lte()
         val nr = SeriesColors.nr()
+        val nrMissing = fiveGState(sim)?.lowercase() ?: "not connected"
         LiveChart(
             title = "Signal strength",
             unit = "dBm",
             series = listOf(
                 ChartSeries("LTE", lte, history.lteRsrp),
-                ChartSeries("5G", nr, history.nrRsrp),
+                ChartSeries("5G", nr, history.nrRsrp, missing = nrMissing),
             ),
             capacity = SignalHistory.CAPACITY,
             secondsPerSample = SignalHistory.SECONDS_PER_SAMPLE,
+            scale = QualityScale.Power,
         )
         LiveChart(
             title = "Signal quality",
             unit = "dB",
             series = listOf(
                 ChartSeries("LTE", lte, history.lteSinr),
-                ChartSeries("5G", nr, history.nrSinr),
+                ChartSeries("5G", nr, history.nrSinr, missing = nrMissing),
             ),
             capacity = SignalHistory.CAPACITY,
             secondsPerSample = SignalHistory.SECONDS_PER_SAMPLE,
+            scale = QualityScale.Snr,
         )
 
         kv("Network", sim.displayNetwork)
+        kv("5G", fiveGState(sim))
         kv("Override", sim.overrideNetwork.takeIf { it != "NONE" })
         kv("NR state", sim.nrState)
         kv("EN-DC available", sim.isEnDcAvailable?.let { if (it) "yes" else "no" })
         kv("NR available", sim.isNrAvailable?.let { if (it) "yes" else "no" })
         // LTE
-        kv("LTE RSRP", sim.lteRsrp?.let { "$it dBm" })
-        kv("LTE RSRQ", sim.lteRsrq?.let { "$it dB" })
-        kv("LTE SNR", sim.lteRssnr?.let { "$it dB" })
+        kv("LTE RSRP", sim.lteRsrp?.let { "$it dBm" }, QualityScale.Power.of(sim.lteRsrp))
+        kv("LTE RSRQ", sim.lteRsrq?.let { "$it dB" }, QualityScale.Rsrq.of(sim.lteRsrq))
+        kv("LTE SNR", sim.lteRssnr?.let { "$it dB" }, QualityScale.Snr.of(sim.lteRssnr))
         kv("LTE band", sim.lteBand)
         kv("EARFCN", sim.lteEarfcn?.toString())
         kv("LTE PCI", sim.ltePci?.toString())
         // NR
-        kv("NR SS-RSRP", sim.nrSsRsrp?.let { "$it dBm" })
-        kv("NR SS-RSRQ", sim.nrSsRsrq?.let { "$it dB" })
-        kv("NR SS-SINR", sim.nrSsSinr?.let { "$it dB" })
+        kv("NR SS-RSRP", sim.nrSsRsrp?.let { "$it dBm" }, QualityScale.Power.of(sim.nrSsRsrp))
+        kv("NR SS-RSRQ", sim.nrSsRsrq?.let { "$it dB" }, QualityScale.Rsrq.of(sim.nrSsRsrq))
+        kv("NR SS-SINR", sim.nrSsSinr?.let { "$it dB" }, QualityScale.Snr.of(sim.nrSsSinr))
         // Public cell list first, live channel table (Shizuku) as fallback.
         val nrArfcn = sim.nrArfcn ?: channel?.arfcn
         val nrBand = sim.nrBand ?: channel?.band
@@ -312,11 +342,15 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
 }
 
 @Composable
-private fun kv(key: String, value: String?) {
+private fun kv(key: String, value: String?, quality: Quality? = null) {
     if (value == null) return
     BasicComponent(
         title = key,
         endActions = {
+            if (quality != null) {
+                QualityChip(quality)
+                Spacer(Modifier.width(8.dp))
+            }
             Text(
                 text = value,
                 color = MiuixTheme.colorScheme.onSurfaceVariantActions,

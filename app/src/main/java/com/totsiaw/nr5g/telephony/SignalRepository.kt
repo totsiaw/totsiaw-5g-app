@@ -80,7 +80,15 @@ class SignalRepository(private val context: Context) {
     }
 
     private fun publish() {
-        _signals.value = holders.values.map { it.data }.sortedBy { it.slotIndex }
+        val dataSub = SubscriptionManager.getDefaultDataSubscriptionId()
+        _signals.value = holders.values
+            .map { it.data.copy(isDataSim = it.data.subId == dataSub) }
+            .sortedBy { it.slotIndex }
+    }
+
+    /** Re-check which SIM carries data (the user can switch it any time). */
+    fun refreshDataSim() {
+        if (holders.isNotEmpty()) publish()
     }
 
     private inner class SignalCallback(val subId: Int) : TelephonyCallback(),

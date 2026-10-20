@@ -1,6 +1,8 @@
 package com.totsiaw.nr5g
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -46,6 +48,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var verifyInfo by mutableStateOf<VerifyInfo?>(null)
         private set
+    /** Wi-Fi is the active network, so mobile data (and its 5G leg) sits idle. */
+    var onWifi by mutableStateOf(false)
+        private set
+
+    private val connectivity = app.getSystemService(ConnectivityManager::class.java)
 
     init {
         ShizukuManager.init(app)
@@ -59,6 +66,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (isActive) {
                 delay(SignalHistory.SECONDS_PER_SAMPLE * 1000L)
+                onWifi = connectivity?.getNetworkCapabilities(connectivity.activeNetwork)
+                    ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                repo.refreshDataSim()
                 val sims = signals.value
                 if (sims.isNotEmpty()) {
                     val old = _history.value

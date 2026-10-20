@@ -44,7 +44,13 @@ import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /** One line on a [LiveChart]. Values are oldest → newest, one per sample; null = no reading. */
-data class ChartSeries(val name: String, val color: Color, val values: List<Float?>)
+data class ChartSeries(
+    val name: String,
+    val color: Color,
+    val values: List<Float?>,
+    /** What to show in the legend when there is no current reading. */
+    val missing: String = "no reading",
+)
 
 /** Series colors follow the technology, never its rank: LTE is always blue, NR always orange. */
 object SeriesColors {
@@ -67,8 +73,11 @@ fun LiveChart(
     capacity: Int,
     secondsPerSample: Int,
     modifier: Modifier = Modifier,
+    scale: QualityScale? = null,
 ) {
     val shown = series.filter { s -> s.values.any { it != null } }
+    // Series with no history still get a legend line, so "5G not connected" is visible.
+    val legend = series.filter { s -> s in shown || s.missing != "no reading" }
     val count = series.maxOfOrNull { it.values.size } ?: 0
     var scrub by remember { mutableStateOf<Int?>(null) } // slot 0..capacity-1, left → right
 
@@ -94,24 +103,27 @@ fun LiveChart(
             }
         }
         Spacer(Modifier.height(6.dp))
-        // Legend with live values. Two or more series: swatch + name + value.
-        // A single series needs no swatch; its name + value is enough.
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (shown.isEmpty()) {
+        // Legend, one line per series: swatch + name + value + quality chip.
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (legend.isEmpty()) {
                 Text("Waiting for signal…", color = muted, fontSize = 12.sp)
             }
-            shown.forEach { s ->
+            legend.forEach { s ->
                 val v = readIndex?.let { s.values.getOrNull(it) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (shown.size > 1) {
+                    if (legend.size > 1) {
                         Box(Modifier.size(8.dp).clip(CircleShape).background(s.color))
                         Spacer(Modifier.width(6.dp))
                     }
                     Text(
-                        text = "${s.name}  ${v?.let { "${it.roundToInt()} $unit" } ?: "no reading"}",
-                        color = ink,
+                        text = "${s.name}  ${v?.let { "${it.roundToInt()} $unit" } ?: s.missing}",
+                        color = if (v == null) muted else ink,
                         fontSize = 12.sp,
                     )
+                    if (v != null && scale != null) {
+                        Spacer(Modifier.width(8.dp))
+                        QualityChip(scale.of(v))
+                    }
                 }
             }
         }
@@ -150,6 +162,27 @@ fun LiveChart(
             val (lo, hi, step) = niceRange(all.min(), all.max())
             fun y(v: Float) = bottom - (v - lo) / (hi - lo) * (bottom - top)
             fun x(i: Int) = left + plotW * (capacity - count + i) / (capacity - 1).toFloat()
+
+            // Faint quality zones behind the lines: green strong ... red very weak.
+            if (scale != null) {
+                val zones = listOf(
+                    Quality.Strong to (scale.strongAbove to Float.MAX_VALUE),
+                    Quality.Ok to (scale.okAbove to scale.strongAbove),
+                    Quality.Weak to (scale.weakAbove to scale.okAbove),
+                    Quality.VeryWeak to (-Float.MAX_VALUE to scale.weakAbove),
+                )
+                zones.forEach { (q, range) ->
+                    val zTop = y(range.second.coerceAtMost(hi))
+                    val zBottom = y(range.first.coerceAtLeast(lo))
+                    if (zBottom > zTop) {
+                        drawRect(
+                            q.color.copy(alpha = 0.08f),
+                            topLeft = Offset(left, zTop),
+                            size = androidx.compose.ui.geometry.Size(plotW, zBottom - zTop),
+                        )
+                    }
+                }
+            }
 
             // Hairline gridlines + tick labels (recessive).
             var t = lo
