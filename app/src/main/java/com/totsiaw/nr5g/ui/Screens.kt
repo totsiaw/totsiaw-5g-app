@@ -322,22 +322,38 @@ private fun kv(key: String, value: String?) {
 @Composable
 private fun VerifyCard(info: VerifyInfo, onClose: () -> Unit) {
     Card(modifier = cardMod()) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(
-                text = if (info.userNrMode == "3") "5G is switched on" else "Default setting",
-                color = MiuixTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text("Network report", color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 12.sp)
-            Text(info.registry, color = MiuixTheme.colorScheme.onSurface, fontSize = 11.sp)
-            Spacer(Modifier.height(8.dp))
-            Text("Modem log", color = MiuixTheme.colorScheme.onSurfaceVariantActions, fontSize = 12.sp)
-            Text(info.logcat, color = MiuixTheme.colorScheme.onSurface, fontSize = 11.sp)
-            Spacer(Modifier.height(12.dp))
-            TextButton(text = "Close", onClick = onClose, modifier = Modifier.fillMaxWidth())
+        kv("5G switch", if (info.switchedOn) "On" else "Off (default)")
+        if (info.error || info.sims.isEmpty()) {
+            BasicComponent(title = "Couldn't read the network", summary = "Check that Shizuku is running, then try again.")
         }
+        info.sims.forEach { sim ->
+            val verdict = sim.verdict(info.switchedOn)
+            BasicComponent(
+                title = sim.carrier,
+                summary = verdict,
+                startAction = {
+                    Dot(
+                        when {
+                            verdict.startsWith("Connected") -> AppColors.Active
+                            verdict.startsWith("5G ready") -> AppColors.Accent
+                            else -> MiuixTheme.colorScheme.onSurfaceVariantActions
+                        }
+                    )
+                },
+                endActions = {
+                    Text(
+                        text = sim.showing,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantActions,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    )
+                },
+            )
+        }
+        TextButton(
+            text = "Close",
+            onClick = onClose,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        )
     }
 }
 

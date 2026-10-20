@@ -68,19 +68,72 @@ class NrModeController {
     }
 
     suspend fun verify(): VerifyInfo {
-        val mode = readUserNrMode()
+        val switchedOn = isNsaEnabled()
+        // Only the current per-SIM state lines (one service-state + one display line
+        // per SIM, in slot order); the rest of the dump is history.
         val reg = ShizukuManager.exec(
-            "dumpsys telephony.registry | grep -E 'isEnDcAvailable|isNrAvailable|overrideNetwork|nrState' | head -n 20"
+            "dumpsys telephony.registry | grep -E '^ +(mServiceState|mTelephonyDisplayInfo)='"
         )
-        val log = ShizukuManager.exec(
-            "logcat -d -t 400 OplusNrModeRusCarrierControl:* OplusNrModeUpdater:* NetworkTypeController:* *:S | tail -n 15"
-        )
-        return VerifyInfo(
-            userNrMode = mode,
-            registry = reg.out.ifBlank { reg.err.ifBlank { "(no data)" } },
-            logcat = log.out.ifBlank { log.err.ifBlank { "(no logcat lines)" } },
-        )
+        return VerifyInfo(switchedOn = switchedOn, sims = parseSims(reg.out), error = !reg.ok && reg.out.isBlank())
+    }
+
+    private fun parseSims(text: String): List<SimStatus> {
+        val sims = mutableListOf<SimStatus>()
+        for (line in text.lines()) {
+            val l = line.trim()
+            if (l.startsWith("mServiceState=")) {
+                sims += SimStatus(
+                    carrier = Regex("mOperatorAlphaLong=([^,]+)").find(l)?.groupValues?.get(1)?.trim()
+                        ?.takeIf { it != "null" } ?: "SIM ${sims.size + 1}",
+                    towerNearby = flag(l, "isNrAvailable"),
+                    phoneReady = flag(l, "isEnDcAvailable"),
+                    carrierBlocks = flag(l, "isDcNrRestricted"),
+                )
+            } else if (l.startsWith("mTelephonyDisplayInfo=") && sims.isNotEmpty()) {
+                val override = Regex("overrideNetwork=(\\w+)").find(l)?.groupValues?.get(1)
+                val network = Regex("network=(\\w+)").find(l)?.groupValues?.get(1)
+                sims[sims.lastIndex] = sims.last().copy(showing = showingLabel(network, override))
+            }
+        }
+        return sims
+    }
+
+    private fun flag(line: String, name: String): Boolean? =
+        Regex("$name\\s*=\\s*(true|false)").find(line)?.groupValues?.get(1)?.toBoolean()
+
+    private fun showingLabel(network: String?, override: String?): String = when (override) {
+        "NR_NSA", "NR_NSA_MMWAVE" -> "5G"
+        "NR_ADVANCED" -> "5G+"
+        "LTE_CA", "LTE_ADVANCED_PRO" -> "LTE+"
+        else -> when (network) {
+            "NR" -> "5G"
+            "LTE" -> "LTE"
+            null, "UNKNOWN" -> "No service"
+            else -> network
+        }
     }
 }
 
-data class VerifyInfo(val userNrMode: String?, val registry: String, val logcat: String)
+/** Result of "Check status", already in plain terms. */
+data class VerifyInfo(val switchedOn: Boolean, val sims: List<SimStatus>, val error: Boolean)
+
+data class SimStatus(
+    val carrier: String,
+    val towerNearby: Boolean?,   // isNrAvailable: the LTE cell advertises a 5G partner
+    val phoneReady: Boolean?,    // isEnDcAvailable: phone can add 5G on this cell
+    val carrierBlocks: Boolean?, // isDcNrRestricted
+    val showing: String = "No service",
+) {
+    /**
+     * One-line answer to "is 5G working on this SIM?". While the 5G switch is off the
+     * modem doesn't report nearby 5G at all, so "no tower" is only claimed when it's on.
+     */
+    fun verdict(switchedOn: Boolean): String = when {
+        showing.startsWith("5G") -> "Connected to 5G"
+        carrierBlocks == true -> "Your plan doesn't allow 5G"
+        phoneReady == true -> "5G ready. It connects when this SIM is using data."
+        !switchedOn -> "5G is off. Turn it on to look for 5G."
+        towerNearby == true -> "5G tower nearby. Still connecting, check again in a minute."
+        else -> "No 5G tower here"
+    }
+}
