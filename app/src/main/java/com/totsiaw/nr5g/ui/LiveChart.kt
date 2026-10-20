@@ -1,7 +1,9 @@
 package com.totsiaw.nr5g.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -92,15 +94,26 @@ fun LiveChart(
     fun indexFor(slot: Int): Int? = (slot - (capacity - count)).takeIf { it in 0 until count }
     val readIndex: Int? = scrub?.let { indexFor(it) } ?: (count - 1).takeIf { it >= 0 }
 
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-        // Header: title on the left, readout (current, or scrubbed) on the right.
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth().animateContentSize().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        // Header: (i) + title on the left, scrub time on the right. Tap the title for its meaning.
+        val info = InfoText.of(title)
+        var infoOpen by remember(title) { mutableStateOf(false) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (info != null) Modifier.clickable { infoOpen = !infoOpen } else Modifier),
+        ) {
+            if (info != null) InfoIcon()
             Text(title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.weight(1f))
             if (scrub != null && readIndex != null) {
                 val ago = (count - 1 - readIndex) * secondsPerSample
                 Text(if (ago == 0) "now" else "${ago}s ago", color = muted, fontSize = 12.sp)
             }
+        }
+        if (infoOpen && info != null) {
+            Text(info, color = muted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
         }
         Spacer(Modifier.height(6.dp))
         // Legend, one line per series: swatch + name + value + quality chip.

@@ -2,6 +2,7 @@ package com.totsiaw.nr5g.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -374,8 +375,14 @@ private fun SignalCard(sim: SimSignal, history: SignalHistory, channel: NrChanne
 @Composable
 private fun kv(key: String, value: String?, quality: Quality? = null) {
     if (value == null) return
+    val info = InfoText.of(key)
+    var open by remember(key) { mutableStateOf(false) }
     BasicComponent(
+        modifier = Modifier.animateContentSize(),
         title = key,
+        summary = if (open) info else null,
+        startAction = if (info != null) ({ InfoIcon() }) else null,
+        onClick = if (info != null) ({ open = !open }) else null,
         endActions = {
             if (quality != null) {
                 QualityChip(quality)
